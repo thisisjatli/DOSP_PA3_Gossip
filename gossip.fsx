@@ -105,7 +105,7 @@ let worker boss num (mailbox:Actor<_>) =
         |StartPushSum ind->     // the chosen actor starts pushsum message
             let index = rand.Next(0,neighbours.Length)
             let neighbourIndex = index |> float
-            neighbours.[index] <! PushSum(index+1 |> float,1.0)
+            neighbours.[index] <! PushSum(prevSum |> float,1.0)
          
         |PushSum (s,w)->
             let newSum = prevSum + s
