@@ -1,11 +1,3 @@
-//******************************************************************************
-
-//                            Author: Tushar Ranjan, Sankalp Pandey
-//                            Course: Distributed Operating Systems
-//                            Instructor: Alin Dobra
-
-//*******************************************************************************/
-
 #time "on"
 #r "nuget: Akka.FSharp"
 #r "nuget: Akka.TestKit"
@@ -25,8 +17,8 @@ type GossipPushSum =
     | SetValues of int * IActorRef[] * int
     | Result of Double * Double
 
-let rand = System.Random()
-let timer = Stopwatch()
+let rand = System.Random()  // randomly choose an actor to start
+let timer = Stopwatch() // record the total elapsed time
 
 let system = ActorSystem.Create("System")
 
@@ -34,61 +26,66 @@ let mutable convergenceTime = 0
 
 // Main actor mailbox responsible for starting and terminating algorithms
 let boss (mailbox:Actor<_>) =
-    let mutable convergedMessagesCount = 0
-    let mutable convergedWorkersCount = 0
+    let mutable convergedGossipCount = 0
+    let mutable convergedPushsumCount = 0
     let mutable startTime = 0
-    let mutable totalWorkers =0
-    let mutable allNodes:IActorRef[] = [||]
+    let mutable totalActors =0
+    let mutable allActors:IActorRef[] = [||]
     let rec loop() = actor {
         let! message = mailbox.Receive()
         match message with
-         | TerminateGossip message ->
-                let endTime = System.DateTime.Now.TimeOfDay.Milliseconds
-                convergedMessagesCount <- convergedMessagesCount + 1 
-                if convergedMessagesCount = totalWorkers then
-                    let realTime = timer.ElapsedMilliseconds
-                    printfn "Gossip Convergence time : "
-                    printfn "Real Convergence Time: %A ms" realTime
-                    convergenceTime <-endTime-startTime |> abs
-                    printfn "System Convergence Time: %A ms" (convergenceTime)
-                    Environment.Exit 0
-                else
-                    let newStart= rand.Next(0,allNodes.Length)
-                    allNodes.[newStart] <! StartGossip("Hello")
+        | TerminateGossip message ->
+            let endTime = System.DateTime.Now.TimeOfDay.Milliseconds
+            convergedGossipCount <- convergedGossipCount + 1 
+            if convergedGossipCount = totalActors then      // all actors have terminated
+                let processTime = timer.ElapsedMilliseconds // total process time including network creation
+                printfn "Total Processing Time: %A ms" processTime
+                convergenceTime <-endTime-startTime |> abs  // algorithm runtime
+                printfn "Gossip Convergence time: %A ms" (convergenceTime)
+                Environment.Exit 0
+            else    // select a new starting actor when the gossip has stopped
+                let newStart= rand.Next(0,allActors.Length)
+                allActors.[newStart] <! StartGossip("New start")
 
-            | TerminatePushSum (s,w) ->
-                let endTime = System.DateTime.Now.TimeOfDay.Milliseconds
-                convergedWorkersCount <- convergedWorkersCount + 1
-                if convergedWorkersCount = totalWorkers then
-                    let realTime = timer.ElapsedMilliseconds
-                    printfn "PushSum Convergence time : "
-                    printfn "Real Convergence Time: %A ms" realTime
-                    convergenceTime <-endTime-startTime |> abs
-                    printfn "System Convergence Time: %A ms" (convergenceTime)
-                    Environment.Exit 0
+        | TerminatePushSum (s,w) ->
+            let endTime = System.DateTime.Now.TimeOfDay.Milliseconds
+            convergedPushsumCount <- convergedPushsumCount + 1
+            if convergedPushsumCount = totalActors then
+                let processTime = timer.ElapsedMilliseconds
+                printfn "Total Processing Time: %A ms" processTime
+                convergenceTime <-endTime-startTime |> abs
+                printfn "Pushsum Convergence time: %A ms" (convergenceTime)
+                Environment.Exit 0
 
-                else
-                    let newStart=rand.Next(0,allNodes.Length)
-                    allNodes.[newStart] <! PushSum(s,w)
+            else
+                let newStart=rand.Next(0,allActors.Length)
+                allActors.[newStart] <! PushSum(s,w)
 
-            | SetValues (strtTime,nodesRef,totNds) ->
-                startTime <-strtTime    // start the algorithm
-                allNodes <- nodesRef    // array of actors
-                totalWorkers <-totNds   // number of actors
-            | _->()
+        | SetValues (strtTime,actorsArr,totNds) ->
+            startTime <-strtTime    // start the algorithm
+            allActors <- actorsArr    // array of actors
+            totalActors <-totNds   // number of actors
+        
+        | _->()
+
         return! loop()
     }
     loop()
 
-// Individual nodes' mailbox
+// Individual actors' mailbox
 let worker boss num (mailbox:Actor<_>) =
     let mutable neighbours: IActorRef[] = [||]
-    let mutable timesGossipMessageHeard = 0
-    let mutable terminateWorker = 0
-    let mutable counter = 0
-    let mutable oldSum= num |> float
-    let mutable weight = 1.0
-    let ratiolimit = 10.0**(-10.0)  // ratio change threshold
+    
+    // for gossip
+    let mutable timesGossipMessageHeard = 0 // how many times it has heard the gossip
+    let gossipMessageLimit = 10         // gossip terminate threshold
+
+    // for pushsum
+    let mutable terminateWorker = 0     // if the worker has terminated
+    let mutable counter = 0             // count the time it has not changed more than threshold
+    let mutable prevSum= num |> float   // original sum is its id
+    let mutable weight = 1.0            // original weight is 1
+    let ratioLimit = 10.0**(-10.0)      // ratio change threshold
 
     let rec loop() = actor {
         let! message = mailbox.Receive()
@@ -98,25 +95,24 @@ let worker boss num (mailbox:Actor<_>) =
 
         | StartGossip gossipMessage ->
             timesGossipMessageHeard <- timesGossipMessageHeard + 1
-            if(timesGossipMessageHeard = 10)
+            if(timesGossipMessageHeard = gossipMessageLimit)
             then
-                boss <! TerminateGossip(gossipMessage)
+                boss <! TerminateGossip(gossipMessage)  // reached limit, tell boss it's terminating
             else
-                let neighbourIndex= rand.Next(0,neighbours.Length)
+                let neighbourIndex= rand.Next(0,neighbours.Length)  // select the neighbor to pass the gossip
                 neighbours.[neighbourIndex] <! StartGossip(gossipMessage)
 
-        |StartPushSum ind->
-
+        |StartPushSum ind->     // the chosen actor starts pushsum message
             let index = rand.Next(0,neighbours.Length)
             let neighbourIndex = index |> float
-            neighbours.[index] <! PushSum(neighbourIndex,1.0)
+            neighbours.[index] <! PushSum(index+1 |> float,1.0)
          
         |PushSum (s,w)->
-            let newsum = oldSum + s
+            let newSum = prevSum + s
             let newweight = weight + w
-            let newSumWeightRatio = newsum / newweight
-            let oldSumWeightRatio = oldSum / weight
-            let sumWeightChanged = newSumWeightRatio - oldSumWeightRatio |> abs
+            let newSumEstimate = newSum / newweight
+            let prevSumEstimate = prevSum / weight
+            let SumEstimateChanged = newSumEstimate - prevSumEstimate |> abs
 
             if (terminateWorker = 1) then
 
@@ -124,7 +120,7 @@ let worker boss num (mailbox:Actor<_>) =
                 neighbours.[index] <! PushSum(s, w) // the actor has already terminated, just pass the msg
             
             else
-                if sumWeightChanged > ratiolimit then   // changes have to be consecutive
+                if SumEstimateChanged > ratioLimit then   // changes have to be consecutive
                     counter <- 0
                 else 
                     counter <- counter + 1  // if condition satisfied
@@ -132,14 +128,15 @@ let worker boss num (mailbox:Actor<_>) =
                 if  counter = 3 then    // if three consecutive times, terminate
                     counter <- 0
                     terminateWorker <- 1
-                    boss <! TerminatePushSum(oldSum, weight)    // tell boss it's terminating
+                    boss <! TerminatePushSum(prevSum, weight)    // tell boss it's terminating
             
-                oldSum <- newsum / 2.0  // keep half, pass the other half
+                prevSum <- newSum / 2.0  // keep half, pass the other half
                 weight <- newweight / 2.0
                 let index = rand.Next(0, neighbours.Length)
-                neighbours.[index] <! PushSum(oldSum, weight)
+                neighbours.[index] <! PushSum(prevSum, weight)
            
         | _-> ()
+        
         return! loop()
     }
     loop()
@@ -149,7 +146,7 @@ let startAlgo algo num nodeArr=
     (nodeArr : _ array)|>ignore
     if algo="gossip" then
         let starter= rand.Next(0,num-1)
-        nodeArr.[starter]<!StartGossip("LetsGo")
+        nodeArr.[starter]<!StartGossip("First start")
     elif algo="pushsum" then
         let starter= rand.Next(0,num-1)
         nodeArr.[starter]<!StartPushSum(starter)
@@ -158,141 +155,142 @@ let startAlgo algo num nodeArr=
 
 //------------Topologies start-----------//
 
-// Full Network Toplogy. All nodes are neighbours to each other
-let createFullNetwork tworkers algo =
-    
+// Full Network Toplogy. All actors are neighbours to each other
+let createFullNetwork actorNum algo =
     let bossActor = spawn system "boss_actor" boss
-    let nodes = Array.zeroCreate(tworkers)
+    let actors = Array.zeroCreate(actorNum)
     let mutable neighbours: IActorRef[]= [||]
-    for start in [0 .. tworkers-1] do
-        nodes.[start]<- worker bossActor (start+1)|> spawn system ("Actor"+string(start))
+    for start in [0 .. actorNum-1] do   // spawn all actors
+        actors.[start]<- worker bossActor (start+1)|> spawn system ("Actor"+string(start))
    
-    for start in [0 .. tworkers-1] do
+    for start in [0 .. actorNum-1] do
         if(start=0) then 
-                neighbours <- nodes.[1..tworkers-1]
-                nodes.[start]<!SetNeighbours(neighbours)
-        else if(start=tworkers-1)then 
-                neighbours <- nodes.[1..tworkers-2]
-                nodes.[start]<!SetNeighbours(neighbours)
+                neighbours <- actors.[1..actorNum-1]
+                actors.[start]<!SetNeighbours(neighbours)
+        else if(start=actorNum-1)then 
+                neighbours <- actors.[1..actorNum-2]
+                actors.[start]<!SetNeighbours(neighbours)
         else
-            neighbours <- Array.append nodes.[0..start-1] nodes.[start+1..tworkers-1]
-            nodes.[start] <! SetNeighbours(neighbours)
+            neighbours <- Array.append actors.[0..start-1] actors.[start+1..actorNum-1]
+            actors.[start] <! SetNeighbours(neighbours)
     timer.Start()
-    bossActor<!SetValues(System.DateTime.Now.TimeOfDay.Milliseconds,nodes,tworkers)
-    startAlgo algo tworkers nodes
+    bossActor<!SetValues(System.DateTime.Now.TimeOfDay.Milliseconds,actors,actorNum)
+    startAlgo algo actorNum actors
 
-let create2DNetwork tworkers algo =
+// 2D Network Toplogy. Left, right, top, bottom are neighbours
+let create2DNetwork actorNum algo =
     let bossActor= boss |> spawn system "boss_actor"
-    let edgelength=int(floor ((float tworkers) ** (1.0/2.0)))
-    printfn "edge - %i" edgelength
-    let total2Dworkers=int(edgelength*edgelength)
-    let nodes = Array.zeroCreate(total2Dworkers)
-    for i in [0..total2Dworkers-1] do
-        nodes.[i]<- worker bossActor (i+1) |> spawn system ("Actor"+string(i))
+    let edgelength=int(floor ((float actorNum) ** (1.0/2.0)))
+    let total2DActors=int(edgelength*edgelength)
+    let actors = Array.zeroCreate(total2DActors)
+    for i in [0..total2DActors-1] do
+        actors.[i]<- worker bossActor (i+1) |> spawn system ("Actor"+string(i))
     let mutable neighbours: IActorRef [] = [||]
-    for l in [0..total2Dworkers-1] do
-        if(l-1 >= 0) then neighbours <- (Array.append neighbours [|nodes.[l-1]|])
-        if(l+1 < total2Dworkers) then neighbours <- (Array.append neighbours [|nodes.[l+1]|])
-        if(l-edgelength >= 0) then neighbours <- (Array.append neighbours [|nodes.[l-edgelength]|])
-        if(l+edgelength < total2Dworkers) then neighbours <- (Array.append neighbours [|nodes.[l+edgelength]|])
-        nodes.[l] <! SetNeighbours(neighbours)
+    for l in [0..total2DActors-1] do
+        if(l-1 >= 0) then neighbours <- (Array.append neighbours [|actors.[l-1]|])
+        if(l+1 < total2DActors) then neighbours <- (Array.append neighbours [|actors.[l+1]|])
+        if(l-edgelength >= 0) then neighbours <- (Array.append neighbours [|actors.[l-edgelength]|])
+        if(l+edgelength < total2DActors) then neighbours <- (Array.append neighbours [|actors.[l+edgelength]|])
+        actors.[l] <! SetNeighbours(neighbours)
         neighbours <- [||]
     timer.Start()
-    bossActor<!SetValues(System.DateTime.Now.TimeOfDay.Milliseconds,nodes,total2Dworkers)
-    startAlgo algo total2Dworkers nodes
+    bossActor<!SetValues(System.DateTime.Now.TimeOfDay.Milliseconds,actors,total2DActors)
+    startAlgo algo total2DActors actors
 
 // 3D Network Toplogy. Left, right, top, bottom, front and back are neighbours
-let create3DNetwork tworkers algo =
+let create3DNetwork actorNum algo =
     let bossActor= boss |> spawn system "boss_actor"
-    let edgelength=int(floor ((float tworkers) ** (1.0/3.0)))
-    printfn "edge - %i" edgelength
-    let total3Dworkers=int(edgelength*edgelength*edgelength)
-    let nodes = Array.zeroCreate(total3Dworkers)
-    for i in [0..total3Dworkers-1] do
-        nodes.[i]<- worker bossActor (i+1) |> spawn system ("Actor"+string(i))
+    let edgelength=int(floor ((float actorNum) ** (1.0/3.0)))
+    let total3DActors=int(edgelength*edgelength*edgelength)
+    let actors = Array.zeroCreate(total3DActors)
+    for i in [0..total3DActors-1] do
+        actors.[i]<- worker bossActor (i+1) |> spawn system ("Actor"+string(i))
     let mutable neighbours: IActorRef [] = [||]
-    for l in [0..total3Dworkers-1] do
-        if(l-1 >= 0) then neighbours <- (Array.append neighbours [|nodes.[l-1]|])
-        if(l+1 < total3Dworkers) then neighbours <- (Array.append neighbours [|nodes.[l+1]|])
-        if(l-edgelength >= 0) then neighbours <- (Array.append neighbours [|nodes.[l-edgelength]|])
-        if(l+edgelength < total3Dworkers) then neighbours <- (Array.append neighbours [|nodes.[l+edgelength]|])
-        if(l-(edgelength*edgelength) >= 0) then neighbours <- (Array.append neighbours [|nodes.[l-(edgelength*edgelength)]|])
-        if(l+(edgelength*edgelength) < total3Dworkers) then neighbours <- (Array.append neighbours [|nodes.[l+(edgelength*edgelength)]|])
-        nodes.[l] <! SetNeighbours(neighbours)
+    for l in [0..total3DActors-1] do
+        if(l-1 >= 0) then neighbours <- (Array.append neighbours [|actors.[l-1]|])
+        if(l+1 < total3DActors) then neighbours <- (Array.append neighbours [|actors.[l+1]|])
+        if(l-edgelength >= 0) then neighbours <- (Array.append neighbours [|actors.[l-edgelength]|])
+        if(l+edgelength < total3DActors) then neighbours <- (Array.append neighbours [|actors.[l+edgelength]|])
+        if(l-(edgelength*edgelength) >= 0) then neighbours <- (Array.append neighbours [|actors.[l-(edgelength*edgelength)]|])
+        if(l+(edgelength*edgelength) < total3DActors) then neighbours <- (Array.append neighbours [|actors.[l+(edgelength*edgelength)]|])
+        actors.[l] <! SetNeighbours(neighbours)
         neighbours <- [||]
     timer.Start()
-    bossActor<!SetValues(System.DateTime.Now.TimeOfDay.Milliseconds,nodes,total3Dworkers)
-    startAlgo algo total3Dworkers nodes
+    bossActor<!SetValues(System.DateTime.Now.TimeOfDay.Milliseconds,actors,total3DActors)
+    startAlgo algo total3DActors actors
 
 // Line Topology. Left and right are neighbours
-let createLineNetwork tworkers algo =
+let createLineNetwork actorNum algo =
     let bossActor = spawn system "boss_actor" boss
-    let nodes = Array.zeroCreate(tworkers)
-    for i in [0..tworkers-1] do
-        nodes.[i]<- worker bossActor (i+1) |> spawn system ("Actor"+string(i))
+    let actors = Array.zeroCreate(actorNum)
+    for i in [0..actorNum-1] do
+        actors.[i]<- worker bossActor (i+1) |> spawn system ("Actor"+string(i))
     let mutable neighbours:IActorRef[]=Array.empty
-    for i in [0..tworkers-1] do
+    for i in [0..actorNum-1] do
         if i=0 then
-            neighbours<-nodes.[1..1]
-            nodes.[i]<!SetNeighbours(neighbours)
-        elif i=(tworkers-1) then
-            neighbours<-nodes.[(tworkers-2)..(tworkers-2)]
-            nodes.[i]<!SetNeighbours(neighbours)
+            neighbours<-actors.[1..1]
+            actors.[i]<!SetNeighbours(neighbours)
+        elif i=(actorNum-1) then
+            neighbours<-actors.[(actorNum-2)..(actorNum-2)]
+            actors.[i]<!SetNeighbours(neighbours)
         else
-            neighbours<-Array.append nodes.[i-1..i-1] nodes.[i+1..i+1]
-            nodes.[i]<!SetNeighbours(neighbours)
+            neighbours<-Array.append actors.[i-1..i-1] actors.[i+1..i+1]
+            actors.[i]<!SetNeighbours(neighbours)
     timer.Start()
-    bossActor<!SetValues(System.DateTime.Now.TimeOfDay.Milliseconds,nodes,tworkers)
-    startAlgo algo tworkers nodes
+    bossActor<!SetValues(System.DateTime.Now.TimeOfDay.Milliseconds,actors,actorNum)
+    startAlgo algo actorNum actors
 
 // Imperfect 3D topology. Same as 3D but just one extra random node is neighbour
-let createImp3DNetwork tworkers algo =
+let createImp3DNetwork actorNum algo =
     let bossActor = spawn system "boss_actor" boss
-    let edgelength=int(round ((float tworkers) ** (1.0/3.0)))
-    let total3Dworkers=int(edgelength*edgelength*edgelength)
-    printfn "Total workers: %d" total3Dworkers
-    let nodes = Array.zeroCreate(total3Dworkers)
-    for i in [0..total3Dworkers-1] do
-        nodes.[i]<- worker bossActor (i+1) |> spawn system ("Actor"+string(i))
+    let edgelength=int(round ((float actorNum) ** (1.0/3.0)))
+    let total3DActors=int(edgelength*edgelength*edgelength)
+    printfn "Total workers: %d" total3DActors
+    let actors = Array.zeroCreate(total3DActors)
+    for i in [0..total3DActors-1] do
+        actors.[i]<- worker bossActor (i+1) |> spawn system ("Actor"+string(i))
     let mutable neighbours: IActorRef [] = [||]
-    for l in [0..total3Dworkers-1] do
-        if(l-1 >= 0) then neighbours <- (Array.append neighbours [|nodes.[l-1]|])
-        if(l+1 < total3Dworkers) then neighbours <- (Array.append neighbours [|nodes.[l+1]|])
-        if(l-edgelength >= 0) then neighbours <- (Array.append neighbours [|nodes.[l-edgelength]|])
-        if(l+edgelength < total3Dworkers) then neighbours <- (Array.append neighbours [|nodes.[l+edgelength]|])
-        if(l-(edgelength*edgelength) >= 0) then neighbours <- (Array.append neighbours [|nodes.[l-(edgelength*edgelength)]|])
-        if(l+(edgelength*edgelength) < total3Dworkers) then neighbours <- (Array.append neighbours [|nodes.[l+(edgelength*edgelength)]|])
-        let rnd = rand.Next(0, total3Dworkers-1)
-        neighbours <- (Array.append neighbours [|nodes.[rnd]|])
-        nodes.[l] <! SetNeighbours(neighbours)
+    for l in [0..total3DActors-1] do
+        if(l-1 >= 0) then neighbours <- (Array.append neighbours [|actors.[l-1]|])
+        if(l+1 < total3DActors) then neighbours <- (Array.append neighbours [|actors.[l+1]|])
+        if(l-edgelength >= 0) then neighbours <- (Array.append neighbours [|actors.[l-edgelength]|])
+        if(l+edgelength < total3DActors) then neighbours <- (Array.append neighbours [|actors.[l+edgelength]|])
+        if(l-(edgelength*edgelength) >= 0) then neighbours <- (Array.append neighbours [|actors.[l-(edgelength*edgelength)]|])
+        if(l+(edgelength*edgelength) < total3DActors) then neighbours <- (Array.append neighbours [|actors.[l+(edgelength*edgelength)]|])
+        let mutable rnd = l
+        while rnd = l do      // randomly choose one neighbor excluding itself
+            rnd <- rand.Next(0, total3DActors)
+        neighbours <- (Array.append neighbours [|actors.[rnd]|])
+        actors.[l] <! SetNeighbours(neighbours)
         neighbours <- [||]
     timer.Start()
-    bossActor<!SetValues(System.DateTime.Now.TimeOfDay.Milliseconds,nodes,total3Dworkers)
-    startAlgo algo total3Dworkers nodes
+    bossActor<!SetValues(System.DateTime.Now.TimeOfDay.Milliseconds,actors,total3DActors)
+    startAlgo algo total3DActors actors
 
 // -------Topologies end---------//
 
-// Function to start topology setup based on inputs provided
-let setupTopology totalworkers topology algorithm =
+// topology setup based on parameters
+// algorithms starts after setting up
+let setupTopology totalActors topology algorithm =
     if(topology = "full")
-    then createFullNetwork totalworkers algorithm
+    then createFullNetwork totalActors algorithm
     else if(topology = "2D")
-    then create2DNetwork totalworkers algorithm
+    then create2DNetwork totalActors algorithm
     else if(topology = "3D")
-    then create3DNetwork totalworkers algorithm
+    then create3DNetwork totalActors algorithm
     else if(topology = "line")
-    then createLineNetwork totalworkers algorithm
+    then createLineNetwork totalActors algorithm
     else if(topology = "imp3D")
-    then createImp3DNetwork totalworkers algorithm
+    then createImp3DNetwork totalActors algorithm
     else
         printfn "Please enter one the following topologies:\nfull, 2D, 3D, line, imp3D"
 
 // Starting point
 let init =
     let args = fsi.CommandLineArgs |> Array.tail
-    let mutable totalworkers = args.[0] |> int
-    let topo = args.[1] |> string
-    let algorithm = args.[2] |> string
-    setupTopology totalworkers topo algorithm
+    let mutable totalActors = args.[0] |> int   // total actor number
+    let topo = args.[1] |> string               // choose topology
+    let algorithm = args.[2] |> string          // choose algorithm
+    setupTopology totalActors topo algorithm    // create network based on topology
     System.Console.ReadLine() |> ignore
 init
