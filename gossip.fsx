@@ -136,7 +136,7 @@ let worker boss num (mailbox:Actor<_>) =
                 neighbours.[index] <! PushSum(prevSum, weight)
            
         | _-> ()
-        
+
         return! loop()
     }
     loop()
@@ -144,6 +144,9 @@ let worker boss num (mailbox:Actor<_>) =
 // Function to start each algorithm
 let startAlgo algo num nodeArr=
     (nodeArr : _ array)|>ignore
+    printfn "Starting algorithm ..."
+    printfn "Total actors: %d" num
+    printfn "Algorithm used: %s" algo
     if algo="gossip" then
         let starter= rand.Next(0,num-1)
         nodeArr.[starter]<!StartGossip("First start")
@@ -245,7 +248,6 @@ let createImp3DNetwork actorNum algo =
     let bossActor = spawn system "boss_actor" boss
     let edgelength=int(round ((float actorNum) ** (1.0/3.0)))
     let total3DActors=int(edgelength*edgelength*edgelength)
-    printfn "Total workers: %d" total3DActors
     let actors = Array.zeroCreate(total3DActors)
     for i in [0..total3DActors-1] do
         actors.[i]<- worker bossActor (i+1) |> spawn system ("Actor"+string(i))
