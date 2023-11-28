@@ -14,7 +14,7 @@ type GossipPushSum =
     | StartPushSum of int
     | PushSum of float * float
     | TerminatePushSum of float * float
-    | SetValues of int * IActorRef[] * int
+    | SetValues of IActorRef[] * int
     | Result of Double * Double
 
 let rand = System.Random()  // randomly choose an actor to start
@@ -24,45 +24,66 @@ let system = ActorSystem.Create("System")
 
 let mutable convergenceTime = 0
 
+let convergenceTimeDisplay (startTime:TimeSpan) (endTime:TimeSpan) =
+    let mutable elapsedHours = 0
+    let mutable elapsedMinutes = 0
+    let mutable elapsedSeconds = 0
+    let mutable elapsedMilliseconds = 0
+
+    elapsedHours <- endTime.Hours - startTime.Hours |> int |> abs
+    elapsedMinutes <- endTime.Minutes - startTime.Minutes
+    if elapsedMinutes < 0 then
+        elapsedMinutes <- 60 + elapsedMinutes |> int
+    elapsedSeconds <- endTime.Seconds - startTime.Seconds
+    if elapsedSeconds < 0 then
+        elapsedSeconds <- 60 + elapsedSeconds |> int
+    elapsedMilliseconds <- endTime.Milliseconds - startTime.Milliseconds
+    if elapsedMilliseconds < 0 then
+        elapsedMilliseconds <- 1000 + elapsedMilliseconds |> int
+    
+    printfn "Convergence time: %d hr %d min %d sec %d ms" elapsedHours elapsedMinutes elapsedSeconds elapsedMilliseconds
+
 // Main actor mailbox responsible for starting and terminating algorithms
 let boss (mailbox:Actor<_>) =
     let mutable convergedGossipCount = 0
     let mutable convergedPushsumCount = 0
-    let mutable startTime = 0
+    let mutable startTime = System.DateTime.Now.TimeOfDay
     let mutable totalActors =0
     let mutable allActors:IActorRef[] = [||]
     let rec loop() = actor {
         let! message = mailbox.Receive()
         match message with
         | TerminateGossip message ->
-            let endTime = System.DateTime.Now.TimeOfDay.Milliseconds
+            let endTime = System.DateTime.Now.TimeOfDay
             convergedGossipCount <- convergedGossipCount + 1 
             if convergedGossipCount = totalActors then      // all actors have terminated
                 let processTime = timer.ElapsedMilliseconds // total process time including network creation
                 printfn "Total Processing Time: %A ms" processTime
-                convergenceTime <-endTime-startTime |> abs  // algorithm runtime
-                printfn "Gossip Convergence time: %A ms" (convergenceTime)
+                printfn "Gossip Start time: %A" (startTime)
+                printfn "Gossip End time: %A" (endTime)
+                convergenceTimeDisplay startTime endTime
                 Environment.Exit 0
             else    // select a new starting actor when the gossip has stopped
                 let newStart= rand.Next(0,allActors.Length)
                 allActors.[newStart] <! StartGossip("New start")
 
         | TerminatePushSum (s,w) ->
-            let endTime = System.DateTime.Now.TimeOfDay.Milliseconds
+            let endTime = System.DateTime.Now.TimeOfDay
             convergedPushsumCount <- convergedPushsumCount + 1
             if convergedPushsumCount = totalActors then
                 let processTime = timer.ElapsedMilliseconds
                 printfn "Total Processing Time: %A ms" processTime
-                convergenceTime <-endTime-startTime |> abs
-                printfn "Pushsum Convergence time: %A ms" (convergenceTime)
+                printfn "Pushsum Start time: %A" (startTime)
+                printfn "Pushsum End time: %A" (endTime)
+                convergenceTimeDisplay startTime endTime
                 Environment.Exit 0
 
             else
                 let newStart=rand.Next(0,allActors.Length)
                 allActors.[newStart] <! PushSum(s,w)
 
-        | SetValues (strtTime,actorsArr,totNds) ->
-            startTime <-strtTime    // start the algorithm
+        | SetValues (actorsArr,totNds) ->
+            startTime <-System.DateTime.Now.TimeOfDay    // start the algorithm
             allActors <- actorsArr    // array of actors
             totalActors <-totNds   // number of actors
         
@@ -78,14 +99,14 @@ let worker boss num (mailbox:Actor<_>) =
     
     // for gossip
     let mutable timesGossipMessageHeard = 0 // how many times it has heard the gossip
-    let gossipMessageLimit = 10         // gossip terminate threshold
+    let gossipMessageLimit = 10             // gossip terminate threshold
 
     // for pushsum
-    let mutable terminateWorker = 0     // if the worker has terminated
-    let mutable counter = 0             // count the time it has not changed more than threshold
-    let mutable prevSum= num |> float   // original sum is its id
-    let mutable weight = 1.0            // original weight is 1
-    let ratioLimit = 10.0**(-10.0)      // ratio change threshold
+    let mutable terminateWorker = 0         // if the worker has terminated
+    let mutable counter = 0                 // count the time it has not changed more than threshold
+    let mutable prevSum= num |> float       // original sum is its id
+    let mutable weight = 1.0                // original weight is 1
+    let ratioLimit = 10.0**(-10.0)          // ratio change threshold
 
     let rec loop() = actor {
         let! message = mailbox.Receive()
@@ -177,7 +198,7 @@ let createFullNetwork actorNum algo =
             neighbours <- Array.append actors.[0..start-1] actors.[start+1..actorNum-1]
             actors.[start] <! SetNeighbours(neighbours)
     timer.Start()
-    bossActor<!SetValues(System.DateTime.Now.TimeOfDay.Milliseconds,actors,actorNum)
+    bossActor<!SetValues(actors,actorNum)
     startAlgo algo actorNum actors
 
 // 2D Network Toplogy. Left, right, top, bottom are neighbours
@@ -197,7 +218,7 @@ let create2DNetwork actorNum algo =
         actors.[l] <! SetNeighbours(neighbours)
         neighbours <- [||]
     timer.Start()
-    bossActor<!SetValues(System.DateTime.Now.TimeOfDay.Milliseconds,actors,total2DActors)
+    bossActor<!SetValues(actors,total2DActors)
     startAlgo algo total2DActors actors
 
 // 3D Network Toplogy. Left, right, top, bottom, front and back are neighbours
@@ -219,7 +240,7 @@ let create3DNetwork actorNum algo =
         actors.[l] <! SetNeighbours(neighbours)
         neighbours <- [||]
     timer.Start()
-    bossActor<!SetValues(System.DateTime.Now.TimeOfDay.Milliseconds,actors,total3DActors)
+    bossActor<!SetValues(actors,total3DActors)
     startAlgo algo total3DActors actors
 
 // Line Topology. Left and right are neighbours
@@ -240,7 +261,7 @@ let createLineNetwork actorNum algo =
             neighbours<-Array.append actors.[i-1..i-1] actors.[i+1..i+1]
             actors.[i]<!SetNeighbours(neighbours)
     timer.Start()
-    bossActor<!SetValues(System.DateTime.Now.TimeOfDay.Milliseconds,actors,actorNum)
+    bossActor<!SetValues(actors,actorNum)
     startAlgo algo actorNum actors
 
 // Imperfect 3D topology. Same as 3D but just one extra random node is neighbour
@@ -266,7 +287,7 @@ let createImp3DNetwork actorNum algo =
         actors.[l] <! SetNeighbours(neighbours)
         neighbours <- [||]
     timer.Start()
-    bossActor<!SetValues(System.DateTime.Now.TimeOfDay.Milliseconds,actors,total3DActors)
+    bossActor<!SetValues(actors,total3DActors)
     startAlgo algo total3DActors actors
 
 // -------Topologies end---------//
