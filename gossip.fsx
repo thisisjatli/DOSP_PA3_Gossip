@@ -34,12 +34,15 @@ let convergenceTimeDisplay (startTime:TimeSpan) (endTime:TimeSpan) =
     elapsedMinutes <- endTime.Minutes - startTime.Minutes
     if elapsedMinutes < 0 then
         elapsedMinutes <- 60 + elapsedMinutes |> int
+        elapsedHours <- elapsedHours - 1 |> int
     elapsedSeconds <- endTime.Seconds - startTime.Seconds
     if elapsedSeconds < 0 then
         elapsedSeconds <- 60 + elapsedSeconds |> int
+        elapsedMinutes <- elapsedMinutes - 1 |> int
     elapsedMilliseconds <- endTime.Milliseconds - startTime.Milliseconds
     if elapsedMilliseconds < 0 then
         elapsedMilliseconds <- 1000 + elapsedMilliseconds |> int
+        elapsedSeconds <- elapsedSeconds - 1 |> int
     
     printfn "Convergence time: %d hr %d min %d sec %d ms" elapsedHours elapsedMinutes elapsedSeconds elapsedMilliseconds
 
