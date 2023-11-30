@@ -19,15 +19,15 @@ let displayConvergenceTime (startTime: TimeSpan) (endTime: TimeSpan) =
 let randomGen = System.Random()
 
 // Define a communication protocol for actors
-type CommProtocol =
-    | EstablishNodeConnections of IActorRef[] * int
-    | InitiatePushSumAlgorithm of int
+type CustomProtocol =
+    | EstablishConnections of IActorRef[] * int
+    | InitiatePushSum of int
     | PushSumMessage of float * float
-    | TerminatePushSumAlgorithm of float * float
-    | AlgorithmFinalResult of double * double
-    | UpdateNeighborConnections of IActorRef[]
-    | GossipInitiation of string
-    | TerminateGossipAlgorithm of string
+    | TerminatePushSum of float * float
+    | AlgorithmResult of double * double
+    | UpdateConnections of IActorRef[]
+    | InitiateGossip of string
+    | TerminateGossip of string
 
 // Define an individual node actor
 let createNodeActor coordinator num (mailbox: Actor<_>) =
@@ -45,18 +45,18 @@ let createNodeActor coordinator num (mailbox: Actor<_>) =
     let rec nodeActorLoop() = actor {
         let! message = mailbox.Receive()
         match message with
-        | UpdateNeighborConnections (neighbors: IActorRef[]) -> 
+        | UpdateConnections (neighbors: IActorRef[]) -> 
             neighborActors <- neighbors
 
-        | GossipInitiation gossipMessage ->
+        | InitiateGossip gossipMessage ->
             gossipMessagesHeard <- gossipMessagesHeard + 1
             if gossipMessagesHeard = maxGossipMessages then
-                coordinator <! TerminateGossipAlgorithm(gossipMessage)
+                coordinator <! TerminateGossip(gossipMessage)
             else
                 let randomNeighborIndex = randomGen.Next(0, neighborActors.Length)
-                neighborActors.[randomNeighborIndex] <! GossipInitiation(gossipMessage)
+                neighborActors.[randomNeighborIndex] <! InitiateGossip(gossipMessage)
 
-        | InitiatePushSumAlgorithm ind ->
+        | InitiatePushSum ind ->
             let randomNeighborIndex = randomGen.Next(0, neighborActors.Length)
             let neighborIndex = float randomNeighborIndex
             neighborActors.[randomNeighborIndex] <! PushSumMessage(currentSum, 1.0)
@@ -81,7 +81,7 @@ let createNodeActor coordinator num (mailbox: Actor<_>) =
                 if counter = 3 then
                     counter <- 0
                     terminationFlag <- 1
-                    coordinator <! TerminatePushSumAlgorithm(currentSum, currentWeight)
+                    coordinator <! TerminatePushSum(currentSum, currentWeight)
             
                 currentSum <- newSum / 2.0
                 currentWeight <- newWeight / 2.0
@@ -104,10 +104,10 @@ let startAlgorithm algorithm num nodesArr =
     printfn "Algorithm type used: %s" algorithm
     if algorithm = "gossip" then
         let starter = randomGen.Next(0, num - 1)
-        nodesArr.[starter] <! GossipInitiation("First start")
+        nodesArr.[starter] <! InitiateGossip("First start")
     elif algorithm = "pushsum" then
         let starter = randomGen.Next(0, num - 1)
-        nodesArr.[starter] <! InitiatePushSumAlgorithm(starter)
+        nodesArr.[starter] <! InitiatePushSum(starter)
     else
         printfn "Incorrect algorithm name entered!"
 
@@ -122,7 +122,7 @@ let coordinator (mailbox: Actor<_>) =
     let rec loop() = actor {
         let! message = mailbox.Receive()
         match message with
-        | TerminateGossipAlgorithm message ->
+        | TerminateGossip message ->
             let endTime = System.DateTime.Now.TimeOfDay
             convergedGossipCount <- convergedGossipCount + 1 
             if convergedGossipCount = totalNodes then
@@ -134,9 +134,9 @@ let coordinator (mailbox: Actor<_>) =
                 Environment.Exit 0
             else
                 let newStart = randomGen.Next(0, allNodes.Length)
-                allNodes.[newStart] <! GossipInitiation("New start")
+                allNodes.[newStart] <! InitiateGossip("New start")
 
-        | TerminatePushSumAlgorithm (s, w) ->
+        | TerminatePushSum (s, w) ->
             let endTime = System.DateTime.Now.TimeOfDay
             convergedPushsumCount <- convergedPushsumCount + 1
             if convergedPushsumCount = totalNodes then
@@ -150,7 +150,7 @@ let coordinator (mailbox: Actor<_>) =
                 let newStart = randomGen.Next(0, allNodes.Length)
                 allNodes.[newStart] <! PushSumMessage(s, w)
 
-        | EstablishNodeConnections (nodesArr, totNodes) ->
+        | EstablishConnections (nodesArr, totNodes) ->
             startTime <- System.DateTime.Now.TimeOfDay
             allNodes <- nodesArr
             totalNodes <- totNodes
@@ -176,12 +176,43 @@ let create2DNetwork numNodes algorithm =
         if l + 1 < total2DNodes then neighborActors <- Array.append neighborActors [|nodes.[l + 1]|]
         if l - edgeLength >= 0 then neighborActors <- Array.append neighborActors [|nodes.[l - edgeLength]|]
         if l + edgeLength < total2DNodes then neighborActors <- Array.append neighborActors [|nodes.[l + edgeLength]|]
-        nodes.[l] <! UpdateNeighborConnections(neighborActors)
+        nodes.[l] <! UpdateConnections(neighborActors)
         neighborActors <- [||]
     stopWatch.Start()
-    coordinatorActor <! EstablishNodeConnections(nodes, total2DNodes)
+    coordinatorActor <! EstablishConnections(nodes, total2DNodes)
     startAlgorithm algorithm total2DNodes nodes
 
+let createImp3DNetwork numNodes algorithm =
+    let coordinatorActor = spawn actorSys "coordinator_actor" coordinator
+    let edgeLength = int(round ((float numNodes) ** (1.0/3.0)))
+    let total3DNodes = int(edgeLength * edgeLength * edgeLength)
+    let nodes = Array.zeroCreate(total3DNodes)
+    let mutable neighborActors: IActorRef[] = [||]
+    
+    // Create node actors and establish connections for an irregular 3D network
+    for i in [0 .. total3DNodes - 1] do
+        nodes.[i] <- createNodeActor coordinatorActor (i + 1) |> spawn actorSys ("Node" + string(i))
+    
+    for i in [0 .. total3DNodes - 1] do
+        if i - 1 >= 0 then neighborActors <- Array.append neighborActors [|nodes.[i - 1]|]
+        if i + 1 < total3DNodes then neighborActors <- Array.append neighborActors [|nodes.[i + 1]|]
+        if i - edgeLength >= 0 then neighborActors <- Array.append neighborActors [|nodes.[i - edgeLength]|]
+        if i + edgeLength < total3DNodes then neighborActors <- Array.append neighborActors [|nodes.[i + edgeLength]|]
+        if i - (edgeLength * edgeLength) >= 0 then neighborActors <- Array.append neighborActors [|nodes.[i - (edgeLength * edgeLength)]|]
+        if i + (edgeLength * edgeLength) < total3DNodes then neighborActors <- Array.append neighborActors [|nodes.[i + (edgeLength * edgeLength)]|]
+        
+        let mutable randomNeighbor = i
+        while randomNeighbor = i do
+            randomNeighbor <- randomGen.Next(0, total3DNodes)
+        
+        neighborActors <- Array.append neighborActors [|nodes.[randomNeighbor]|]
+        nodes.[i] <! UpdateConnections(neighborActors)
+        neighborActors <- [||]
+    
+    stopWatch.Start()
+    coordinatorActor <! EstablishConnections(nodes, total3DNodes)
+    startAlgorithm algorithm total3DNodes nodes
+// Function to create a 3D network topology
 let create3DNetwork numNodes algorithm =
     let coordinatorActor = spawn actorSys "coordinator_actor" coordinator
     let edgeLength = int(floor ((float numNodes) ** (1.0/3.0)))
@@ -197,38 +228,15 @@ let create3DNetwork numNodes algorithm =
         if l + edgeLength < total3DNodes then neighborActors <- Array.append neighborActors [|nodes.[l + edgeLength]|]
         if l - (edgeLength * edgeLength) >= 0 then neighborActors <- Array.append neighborActors [|nodes.[l - (edgeLength * edgeLength)]|]
         if l + (edgeLength * edgeLength) < total3DNodes then neighborActors <- Array.append neighborActors [|nodes.[l + (edgeLength * edgeLength)]|]
-        nodes.[l] <! UpdateNeighborConnections(neighborActors)
+        nodes.[l] <! UpdateConnections(neighborActors)
         neighborActors <- [||]
     stopWatch.Start()
-    coordinatorActor <! EstablishNodeConnections(nodes, total3DNodes)
+    coordinatorActor <! EstablishConnections(nodes, total3DNodes)
     startAlgorithm algorithm total3DNodes nodes
 
-let createImp3DNetwork numNodes algorithm =
-    let coordinatorActor = spawn actorSys "coordinator_actor" coordinator
-    let edgeLength = int(round ((float numNodes) ** (1.0/3.0)))
-    let total3DNodes = int(edgeLength * edgeLength * edgeLength)
-    let nodes = Array.zeroCreate(total3DNodes)
-    let mutable neighborActors: IActorRef[] = [||]
-    for i in [0 .. total3DNodes - 1] do
-        nodes.[i] <- createNodeActor coordinatorActor (i + 1) |> spawn actorSys ("Node" + string(i))
-    for i in [0 .. total3DNodes - 1] do
-        if i - 1 >= 0 then neighborActors <- Array.append neighborActors [|nodes.[i - 1]|]
-        if i + 1 < total3DNodes then neighborActors <- Array.append neighborActors [|nodes.[i + 1]|]
-        if i - edgeLength >= 0 then neighborActors <- Array.append neighborActors [|nodes.[i - edgeLength]|]
-        if i + edgeLength < total3DNodes then neighborActors <- Array.append neighborActors [|nodes.[i + edgeLength]|]
-        if i - (edgeLength * edgeLength) >= 0 then neighborActors <- Array.append neighborActors [|nodes.[i - (edgeLength * edgeLength)]|]
-        if i + (edgeLength * edgeLength) < total3DNodes then neighborActors <- Array.append neighborActors [|nodes.[i + (edgeLength * edgeLength)]|]
-        let mutable randomNeighbor = i
-        while randomNeighbor = i do
-            randomNeighbor <- randomGen.Next(0, total3DNodes)
-        neighborActors <- Array.append neighborActors [|nodes.[randomNeighbor]|]
-        nodes.[i] <! UpdateNeighborConnections(neighborActors)
-        neighborActors <- [||]
-    stopWatch.Start()
-    coordinatorActor <! EstablishNodeConnections(nodes, total3DNodes)
-    startAlgorithm algorithm total3DNodes nodes
+// Function to create an irregular 3D network topology (You can add your implementation here)
 
-// Function to create a 3D network topology
+// Function to create a full network topology
 let createFullNetwork numNodes algorithm =
     let coordinatorActor = spawn actorSys "coordinator_actor" coordinator
     let nodes = Array.zeroCreate(numNodes)
@@ -239,15 +247,15 @@ let createFullNetwork numNodes algorithm =
     for start in [0 .. numNodes - 1] do
         if start = 0 then 
             neighborActors <- nodes.[1..numNodes-1]
-            nodes.[start] <! UpdateNeighborConnections(neighborActors)
+            nodes.[start] <! UpdateConnections(neighborActors)
         elif start = numNodes - 1 then 
             neighborActors <- nodes.[1..numNodes-2]
-            nodes.[start] <! UpdateNeighborConnections(neighborActors)
+            nodes.[start] <! UpdateConnections(neighborActors)
         else
             neighborActors <- Array.append nodes.[0..start-1] nodes.[start+1..numNodes-1]
-            nodes.[start] <! UpdateNeighborConnections(neighborActors)
+            nodes.[start] <! UpdateConnections(neighborActors)
     stopWatch.Start()
-    coordinatorActor <! EstablishNodeConnections(nodes, numNodes)
+    coordinatorActor <! EstablishConnections(nodes, numNodes)
     startAlgorithm algorithm numNodes nodes
 
 // Function to create a line network topology
@@ -266,29 +274,25 @@ let createLineNetwork numNodes algorithm =
             elif i = numNodes - 1 then nodes.[(numNodes - 2)..(numNodes - 2)]
             else Array.append nodes.[i - 1..i - 1] nodes.[i + 1..i + 1]
         
-        nodes.[i] <! UpdateNeighborConnections(neighbors)
+        nodes.[i] <! UpdateConnections(neighbors)
     
     // Start the algorithm
     stopWatch.Start()
-    coordinatorActor <! EstablishNodeConnections(nodes, numNodes)
+    coordinatorActor <! EstablishConnections(nodes, numNodes)
     startAlgorithm algorithm numNodes nodes
 
 // Function to create an irregular 3D network topology (You can add your implementation here)
 
 // Function to set up the desired topology and start the algorithm
+// Function to set up the desired topology and start the algorithm
 let setupTopology totalNodes topology algorithm =
-    if topology = "full" then
-        createFullNetwork totalNodes algorithm
-    elif topology = "2D" then
-        create2DNetwork totalNodes algorithm
-    elif topology = "3D" then
-        create3DNetwork totalNodes algorithm
-    elif topology = "line" then
-        createLineNetwork totalNodes algorithm
-    elif topology = "imp3D" then
-        createImp3DNetwork totalNodes algorithm
-    else
-        printfn "Please enter one of the following topologies: full, 2D, 3D, line, imp3D"
+    match topology with
+    | "full" -> createFullNetwork totalNodes algorithm
+    | "2D" -> create2DNetwork totalNodes algorithm
+    | "3D" -> create3DNetwork totalNodes algorithm
+    | "line" -> createLineNetwork totalNodes algorithm
+    | "imp3D" -> createImp3DNetwork totalNodes algorithm
+    | _ -> printfn "Please enter one of the following topologies: full, 2D, 3D, line, imp3D"
 
 // Function to initialize the distributed system
 let initialize =
