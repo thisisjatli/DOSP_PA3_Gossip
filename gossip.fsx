@@ -99,9 +99,9 @@ let stopWatch: Stopwatch = Stopwatch()
 // Function to start the algorithm with the desired topology
 let startAlgorithm algorithm num nodesArr =
     (nodesArr : _ array) |> ignore
-    printfn "Starting algorithm ..."
-    printfn "Total nodes: %d" num
-    printfn "Algorithm used: %s" algorithm
+    printfn "Algorithm Starts ..."
+    printfn "Total quantity of nodes: %d" num
+    printfn "Algorithm type used: %s" algorithm
     if algorithm = "gossip" then
         let starter = randomGen.Next(0, num - 1)
         nodesArr.[starter] <! GossipInitiation("First start")
@@ -127,10 +127,10 @@ let coordinator (mailbox: Actor<_>) =
             convergedGossipCount <- convergedGossipCount + 1 
             if convergedGossipCount = totalNodes then
                 let processTime = stopWatch.ElapsedMilliseconds
-                printfn "Total Processing Time: %A ms" processTime
                 printfn "Gossip Start time: %A" (startTime)
                 printfn "Gossip End time: %A" (endTime)
                 displayConvergenceTime startTime endTime
+                printfn "Total Processing Time: %A ms" processTime
                 Environment.Exit 0
             else
                 let newStart = randomGen.Next(0, allNodes.Length)
