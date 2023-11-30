@@ -75,6 +75,9 @@ The project was tested with a varying number of nodes (from 100 to 50,000) for b
 | 25000 | 1.713|  X   | 5.538| 1.753 |
 | 50000 | X    |  X   |15.757| 3.316 |
 
+![Aspose Words 42341ffe-a1f4-4b15-8e20-5dcc84e0bbcd 001](https://github.com/thisisjatli/DOSP_PA3_Gossip/assets/64754780/8f0b4dac-7504-44f4-903a-e3b6bb8efae3)
+
+
 #### Push-Sum Algorithm
 
 | Nodes | Full | Line | 2D    | imp3D |
@@ -89,6 +92,9 @@ The project was tested with a varying number of nodes (from 100 to 50,000) for b
 | 10000 |2.464 |  X   |  X    | 5.080 |
 | 25000 |11.153|  X   |  X    |12.917 |
 | 50000 | X    |  X   |  X    |30.817 |
+
+![Aspose Words 42341ffe-a1f4-4b15-8e20-5dcc84e0bbcd 002](https://github.com/thisisjatli/DOSP_PA3_Gossip/assets/64754780/46f38bef-c4e6-4441-8525-093095fd98f7)
+
 
 ## Analysis
 
