@@ -1,10 +1,12 @@
 #r "nuget: Akka.TestKit"
 #r "nuget: Akka.FSharp"
-#time "on"
+
 open System
 open System.Diagnostics
 open Akka.FSharp
 open Akka.Actor
+
+#time "on"
 
 let displayConvergenceTime (startTime: TimeSpan) (endTime: TimeSpan) =
     let hours, minutes, seconds, milliseconds =
