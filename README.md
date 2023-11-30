@@ -1,4 +1,5 @@
-# Distributed Operating System Principles - Programming Assignment 3
+# Distributed Operating System Principles
+# Programming Assignment 3
 
 ## Project Team – 44
 
